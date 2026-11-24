@@ -1,0 +1,42 @@
+{
+  "name": "runstoryboard",
+  "version": "1.0.0",
+  "description": "Turn any AI agent session transcript into a deterministic, self-contained storyboard diagram. No LLM, no network, zero runtime dependencies.",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "runstoryboard": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "static",
+    "examples"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "start": "node dist/cli.js serve"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "agent",
+    "claude-code",
+    "codex",
+    "transcript",
+    "diagram",
+    "storyboard",
+    "svg",
+    "observability",
+    "cli"
+  ],
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8",
+    "@types/node": "^22.10.0"
+  }
+}

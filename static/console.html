@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RunStoryboard console</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #FAF9F6; color: #1F1D1A;
+         font-family: -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+  .top { display: flex; align-items: baseline; gap: 12px; padding: 20px 24px 14px; border-bottom: 1px solid #E5E1D8; }
+  .top .brand { font-size: 14px; font-weight: 700; letter-spacing: .08em; color: #6B675E; }
+  .top .tag { font-size: 11px; color: #A8A296; font-family: ui-monospace, Menlo, monospace; }
+  .wrap { display: grid; grid-template-columns: minmax(320px, 5fr) 7fr; gap: 0; min-height: calc(100vh - 58px); }
+  @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+  .pane { padding: 18px 22px 28px; }
+  .pane + .pane { border-left: 1px solid #E5E1D8; }
+  @media (max-width: 900px) { .pane + .pane { border-left: none; border-top: 1px solid #E5E1D8; } }
+  label { display: block; font-size: 11px; letter-spacing: .06em; color: #6B675E;
+          font-family: ui-monospace, Menlo, monospace; margin: 14px 0 6px; }
+  select, textarea, input[type=file] { width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+          border: 1px solid #E5E1D8; border-radius: 4px; background: #fff; color: #1F1D1A; padding: 8px; }
+  textarea { height: 300px; resize: vertical; line-height: 1.5; }
+  .row { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  button { font: inherit; font-size: 12px; padding: 8px 16px; border-radius: 4px; cursor: pointer;
+           border: 1px solid #1F1D1A; background: #1F1D1A; color: #FAF9F6; }
+  button.ghost { background: transparent; color: #1F1D1A; border-color: #C9C4B8; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .status { font-size: 11px; font-family: ui-monospace, Menlo, monospace; margin-top: 10px; min-height: 16px; color: #6B675E; }
+  .status.err { color: #B23A2E; }
+  .stats { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+  .chip { font-size: 11px; font-family: ui-monospace, Menlo, monospace; color: #6B675E;
+          border: 1px solid #E5E1D8; border-radius: 3px; padding: 3px 8px; background: #fff; }
+  .chip.bad { color: #B23A2E; border-color: #D8A79F; }
+  iframe { width: 100%; height: calc(100vh - 160px); min-height: 480px; border: 1px solid #E5E1D8;
+           border-radius: 6px; background: #fff; }
+  .hint { font-size: 11px; color: #A8A296; margin-top: 8px; line-height: 1.6; }
+</style>
+</head>
+<body>
+<div class="top">
+  <span class="brand">RUNSTORYBOARD</span>
+  <span class="tag">deterministic agent-run diagrams · no AI in the loop</span>
+</div>
+<div class="wrap">
+  <div class="pane">
+    <label for="format">TRANSCRIPT FORMAT</label>
+    <select id="format">
+      <option value="auto" selected>auto-detect</option>
+      <option value="claude">claude (Claude Code session JSONL)</option>
+      <option value="codex">codex (Codex CLI rollout JSONL)</option>
+      <option value="generic">generic (any agent JSONL)</option>
+    </select>
+
+    <label for="file">OR LOAD A FILE</label>
+    <input type="file" id="file" accept=".jsonl,.json,.txt">
+
+    <label for="content">TRANSCRIPT (JSONL, one event per line)</label>
+    <textarea id="content" spellcheck="false" placeholder='{"type":"user","message":{"role":"user","content":"fix the failing test"}}'></textarea>
+
+    <div class="row">
+      <button id="render">Render board</button>
+      <button class="ghost" id="demo-clean">demo: clean run</button>
+      <button class="ghost" id="demo-chaotic">demo: chaotic run</button>
+      <button class="ghost" id="demo-codex">demo: codex session</button>
+    </div>
+    <div class="status" id="status"></div>
+    <p class="hint">
+      Claude Code transcripts live in <code>~/.claude/projects/&lt;project&gt;/&lt;session&gt;.jsonl</code>.<br>
+      Codex rollouts live in <code>~/.codex/sessions/&lt;date&gt;/rollout-*.jsonl</code>.<br>
+      Everything is parsed locally by the server next to you — nothing leaves the machine.
+    </p>
+  </div>
+  <div class="pane">
+    <div class="stats" id="stats"></div>
+    <iframe id="board" title="storyboard board"></iframe>
+  </div>
+</div>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var status = $("status"), board = $("board"), stats = $("stats"), renderBtn = $("render");
+
+  function setStats(s, annotations) {
+    if (!s) { stats.innerHTML = ""; return; }
+    var chips = [
+      s.totalSteps + " steps", s.toolCalls + " tools",
+      s.userMessages + " user", s.assistantTexts + " assistant"
+    ];
+    if (s.errors > 0) chips.push(s.errors + " errors");
+    if (s.retries > 0) chips.push(s.retries + " retries");
+    if (s.loopSuspects > 0) chips.push(s.loopSuspects + " loop?");
+    if (s.parallelGroups > 0) chips.push(s.parallelGroups + " parallel");
+    if (s.durationMs !== null) chips.push(Math.round(s.durationMs / 100) / 10 + "s span");
+    var html = "";
+    for (var i = 0; i < chips.length; i++) {
+      var bad = /errors|retries|loop/.test(chips[i]);
+      html += '<span class="chip' + (bad ? " bad" : "") + '">' + chips[i] + "</span>";
+    }
+    if (annotations && annotations.length > 0) {
+      for (var j = 0; j < annotations.length; j++) {
+        html += '<span class="chip bad">' + annotations[j].note + "</span>";
+      }
+    }
+    stats.innerHTML = html;
+  }
+
+  function render(content, format) {
+    if (!content || content.trim().length === 0) {
+      status.textContent = "paste a transcript or load a file first";
+      status.className = "status err";
+      return;
+    }
+    renderBtn.disabled = true;
+    status.textContent = "rendering…";
+    status.className = "status";
+    fetch("/api/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: content, format: format })
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        renderBtn.disabled = false;
+        if (!res.ok) {
+          status.textContent = res.j.error || "render failed";
+          status.className = "status err";
+          return;
+        }
+        board.srcdoc = res.j.html;
+        setStats(res.j.stats, res.j.annotations);
+        var warns = res.j.warnings || [];
+        status.textContent = warns.length > 0
+          ? "board ready · " + warns.length + " parser warning(s)"
+          : "board ready";
+        status.className = "status";
+      })
+      .catch(function (e) {
+        renderBtn.disabled = false;
+        status.textContent = "request failed: " + e;
+        status.className = "status err";
+      });
+  }
+
+  renderBtn.addEventListener("click", function () { render($("content").value, $("format").value); });
+
+  $("file").addEventListener("change", function () {
+    var f = this.files && this.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      $("content").value = String(reader.result);
+      status.textContent = "loaded " + f.name;
+      status.className = "status";
+    };
+    reader.readAsText(f);
+  });
+
+  function loadDemo(name) {
+    return function () {
+      fetch("/api/demo?name=" + name)
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          $("content").value = j.content;
+          $("format").value = j.format;
+          render(j.content, j.format);
+        });
+    };
+  }
+  $("demo-clean").addEventListener("click", loadDemo("clean"));
+  $("demo-chaotic").addEventListener("click", loadDemo("chaotic"));
+  $("demo-codex").addEventListener("click", loadDemo("codex"));
+})();
+</script>
+</body>
+</html>

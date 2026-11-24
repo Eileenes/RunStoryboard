@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+*.storyboard.html
+.DS_Store
+__pycache__/
+*.db

@@ -1,0 +1,15 @@
+services:
+  runstoryboard:
+    build: .
+    image: runstoryboard:1.0.0
+    container_name: runstoryboard
+    ports:
+      - "7420:7420"
+    read_only: true
+    security_opt:
+      - no-new-privileges
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
